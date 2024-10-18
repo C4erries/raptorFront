@@ -1,4 +1,4 @@
-import {useCallback, useContext, useEffect, useRef, useState} from "react";
+import {useCallback, useContext, useEffect, useReducer, useRef, useState} from "react";
 // @ts-ignore
 import Video from "./Video/video.tsx";
 // @ts-ignore
@@ -8,6 +8,15 @@ import {WebRtcUser} from "../types/webRtcUser.ts";
 import {Answer, Candidate, GetUsers, Offer} from "../types";
 import {useParams} from "react-router-dom";
 
+const reducer = (state, action) => {
+    switch (action.type){
+        case "":
+    }
+}
+interface Tracks{
+    id: string,
+    tracks: Array<MediaStreamTrack>
+}
 const Room = () => {
     const {id: roomId} = useParams()
     // @ts-ignore
@@ -16,11 +25,21 @@ const Room = () => {
     const socketRef = useContext(AuthApi).socketRef;
     const localStreamRef = useRef<MediaStream>();
     const localVideoRef = useRef<HTMLVideoElement>(null);
-    const users = useRef<Array<WebRtcUser>>([])
-    const [streams, setStreams] = useState<Array<MediaStreamTrack>>([])
-    
+    const users = useRef<Map<string, WebRtcUser>>(new Map<string, WebRtcUser>())
+    const [streams, setStreams] = useState<Array<Tracks>>([])
+    /*
+    const addUser = useCallback((user:WebRtcUser)=>{
+        const temp = new Map<string, WebRtcUser>(users)
+        temp.set(user.id, user)
+        setUsers(temp)
+    }, [users])
+*/
     const updateStreams = useCallback((cb)=>{
-        setStreams((prev):Array<MediaStreamTrack> => cb(prev))
+        setStreams((prev):Array<Tracks> => {
+            const temp = cb(prev)
+            console.log(temp)
+            return temp
+        })
         console.log("updateStreams", streams)
     }, [streams])
     
@@ -63,18 +82,18 @@ const Room = () => {
     const addNewUser = useCallback(async (id: string, offer: RTCSessionDescriptionInit) => {
         const user = new WebRtcUser(id, sendIce, updateStreams)
         const answer = await user.createPeerConnection(offer, (localStreamRef.current ? localStreamRef.current.getTracks() : undefined))
-        users.current.push(user)
+        users.current.set(id, user)
         console.log(users)
         return answer
-    }, [sendIce, updateStreams])
+    }, [sendIce, updateStreams, users])
 
     const connectUser = useCallback(async (id:string)=>{
         const user = new WebRtcUser(id, sendIce, updateStreams)
         await user.createPeerConnection(undefined, (localStreamRef.current?localStreamRef.current.getTracks():undefined)).then(offer => sendOffer(id, offer));
         console.log(user)
-        users.current.push(user)
+        users.current.set(id, user)
         console.log("connect ", id, users)
-    },[sendIce, sendOffer, updateStreams] )
+    },[sendIce, sendOffer, updateStreams, users] )
     
     const startSocket = useCallback(()=>{
         if(!socketRef.current) return
@@ -88,10 +107,9 @@ const Room = () => {
                 case "answer": {
                     const data : Answer = parsed.data
                     console.log("answer", users, data.senderId)
-                    const ind = users.current.findIndex((user) => user.id === data.senderId)
-                    if(ind !== -1){
-                        const temp = users.current[ind]
-                        await temp.claimAnswer(data.answer)
+                    const user = users.current.get(data.senderId)
+                    if(user){
+                        await user.claimAnswer(data.answer)
                         /*
                         setUsers(prev => prev.map((user, index) => {
                             if(index === ind)
@@ -119,9 +137,9 @@ const Room = () => {
                     const data : Candidate = parsed.data
                     if(!data.candidate) return;
                     console.log(data.candidate)
-                    const sender = users.current.filter((user) => user.id === data.senderId)
-                    if(sender[0]){
-                        sender[0].claimCandidate(data.candidate)
+                    const sender = users.current.get(data.senderId)
+                    if(sender){
+                        sender.claimCandidate(data.candidate)
                     }
                     else{
                         console.log("Candidate Sender not found")
@@ -130,9 +148,9 @@ const Room = () => {
                 }
                 case "offer": {
                     const data : Offer = parsed.data
-                    const sender = users.current.filter((user) => user.id === data.senderId)
-                    if(sender[0]){
-                        sender[0].claimOffer(data.offer)
+                    const sender = users.current.get(data.senderId)
+                    if(sender){
+                        sender.claimOffer(data.offer)
                             .then(answer => sendAnswer(data.senderId, answer))
                             .catch(err => console.error(err))
                     }
@@ -194,19 +212,29 @@ const Room = () => {
         startSocket();
         console.log("Start Socket")
 
-    }, [getLocalStream, joinRoom, startSocket])
+    }, [getLocalStream, startSocket])
 
 
 
 useEffect(()=>{
    Start()
-},[])
+},[Start])
 
     const renderStreams = useCallback(()=>{
-        console.log("renderStreams")
-        return streams.map ((track, ind) => {
-            console.log(track, ind)
-            return <Video key={ind} track={track}/>
+        return streams.map(({id, tracks}, ind) => {
+            return <div key={id}>{id}{tracks.map((track, key)=>{
+                switch (track.kind) {
+                    case "video":{
+                        return <Video track={track} key={key}/>
+                    }
+                    case "audio":{
+                        return <div key={key}>{`Audio ${id}`}</div>
+                    }
+                    default: {
+                        return <div key={key}>Default</div>
+                    }
+                }
+            })}</div>
         })
 
     }, [streams])

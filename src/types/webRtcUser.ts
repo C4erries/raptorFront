@@ -1,3 +1,7 @@
+interface Tracks{
+    id: string,
+    tracks: Array<MediaStreamTrack>
+}
 export class WebRtcUser{
     id: string;
     pc: RTCPeerConnection;
@@ -5,7 +9,7 @@ export class WebRtcUser{
     sendIce: Function
     updateStreams: Function
 
-    constructor(id: string, sendIce: Function, updateStreams: Function) {
+    constructor(id: string, sendIce: Function, updateStreams: Function, setStreams) {
         this.id = id;
         this.sendIce = sendIce;
         this.updateStreams = updateStreams
@@ -37,10 +41,18 @@ export class WebRtcUser{
                 console.log("onTrack", ev.track, ev.streams)
                 if (!ev) return
 
-                this.updateStreams((prev:Array<MediaStreamTrack>)=>{
-                    return [...prev, ev.track]
+                this.updateStreams((prev:Array<Tracks>):Array<Tracks>=>{
+                    const ind = prev.findIndex((obj) => obj.id === this.id)
+                    if(ind === -1){
+                        const track : Tracks = {id: this.id, tracks: [ev.track]}
+                        return prev.concat([track])
+                    }
+                    const temp = prev[ind]
+                    if(temp.tracks.findIndex((value) => value.id === ev.track.id) !== -1) return prev
+                    temp.tracks = [...temp.tracks, ev.track]
+                    return prev.map((track, index)=>(index===ind?temp:track))
                 })
-                //this.streams.push(ev.track);
+                this.streams.push(ev.track);
             }
 
            // pc.onnegotiationneeded= (ev) => {
@@ -69,10 +81,18 @@ export class WebRtcUser{
             console.log("onTrack", ev.track, ev.streams)
             if (!ev) return
 
-            this.updateStreams((prev:Array<MediaStreamTrack>)=>{
-                return [...prev, ev.track]
+            this.updateStreams((prev:Array<Tracks>):Array<Tracks>=>{
+                const ind = prev.findIndex((obj) => obj.id === this.id)
+                if(ind === -1){
+                    const track : Tracks = {id: this.id, tracks: [ev.track]}
+                    return prev.concat([track])
+                }
+                const temp = prev[ind]
+                if(temp.tracks.findIndex((value) => value.id === ev.track.id) !== -1) return prev
+                temp.tracks = [...temp.tracks, ev.track]
+                return prev.map((track, index)=>(index===ind?temp:track))
             })
-            //this.streams.push(ev.track);
+            this.streams.push(ev.track);
         }
         console.log(tracks)
         if(tracks) tracks.forEach(track => {
