@@ -34,3 +34,7 @@ export type SendRooms = {
 export type CreateRoom ={
     roomId: string;
 }
+export interface Tracks{
+    id: string,
+    tracks: Array<MediaStreamTrack>
+}

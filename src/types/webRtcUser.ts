@@ -1,7 +1,5 @@
-interface Tracks{
-    id: string,
-    tracks: Array<MediaStreamTrack>
-}
+import {Tracks} from "./index";
+
 export class WebRtcUser{
     id: string;
     pc: RTCPeerConnection;

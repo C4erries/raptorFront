@@ -1,32 +1,76 @@
-import {useCallback, useContext, useEffect, useRef} from "react";
-import useStateWithCallback from "./useStateWithCallback";
-import uuidV4 from "uuid";
-import {AuthApi} from "../AuthApi";
-import {WebRtcUser} from "../types/webRtcUser";
-import {Answer, Candidate, GetUsers, Offer} from "../types";
+import {useCallback, useEffect, useRef, useState} from "react";
+// @ts-ignore
+import {WebRtcUser} from "../types/webRtcUser.ts";
+import {Answer, Candidate, GetUsers, Offer, Tracks} from "../types";
 
-const LOCAL_VIDEO = "LOCAL_VIDEO"
+export default function useWebRTC(roomId, selfId, socketRef, localStreamRef?):(Tracks[] & any & Function){
+    // @ts-ignore
+    // @ts-ignore
+    console.log(localStreamRef)
+    const users = useRef<Map<string, WebRtcUser>>(new Map<string, WebRtcUser>())
+    const [streams, setStreams] = useState<Array<Tracks>>([])
 
-export default function useWebRTC(roomId){
-    const selfId = useContext(AuthApi).selfId;
-    const [users, updateUsers] = useStateWithCallback([]);
-    const peerConnections = useRef({})
-    const localMediaStream = useRef(null)
-    const peerMediaElements = useRef({
-        [LOCAL_VIDEO]: null,
-    })
-    const  addNewClient = useCallback((newCLient, cb) => {
-        if(!users.include(newCLient)){
-            updateUsers(list => [...list, newCLient], cb)
-        }
-    }, [users, updateUsers])
+    const updateStreams = useCallback((cb)=>{
+        setStreams((prev):Array<Tracks> => {
+            const temp = cb(prev)
+            console.log(temp)
+            return temp
+        })
+        console.log("updateStreams", streams)
+    }, [streams])
+
+    const sendAnswer = useCallback((receiverId: string, answer: RTCSessionDescriptionInit)=>{
+        socketRef.current.send(JSON.stringify({
+            "event": "answer",
+            "data": {
+                "answer": answer,
+                "senderId": selfId.current,
+                "receiverId": receiverId,
+                "roomId": roomId,
+            }
+        }))
+    },[roomId, selfId, socketRef])
+
+    const sendIce = useCallback((receiverId: string, candidate: RTCIceCandidate)=>{
+        socketRef.current.send(JSON.stringify({
+            "event": "candidate",
+            "data": {
+                "candidate": candidate,
+                "senderId": selfId.current,
+                "receiverId": receiverId,
+                "roomId": roomId,
+            }
+        }))
+    },[roomId, selfId, socketRef])
+
+    const sendOffer = useCallback((receiverId: string, offer: RTCSessionDescriptionInit)=>{
+        socketRef.current.send(JSON.stringify({
+            "event": "offer",
+            "data": {
+                "offer": offer,
+                "senderId": selfId.current,
+                "receiverId": receiverId,
+                "roomId": roomId,
+            }
+        }))
+    },[roomId, selfId, socketRef])
+
     const addNewUser = useCallback(async (id: string, offer: RTCSessionDescriptionInit) => {
-        const user = new WebRtcUser(id, sendIce)
+        const user = new WebRtcUser(id, sendIce, updateStreams)
         const answer = await user.createPeerConnection(offer, (localStreamRef.current ? localStreamRef.current.getTracks() : undefined))
-        updateUsers((prev) => [...prev, user])
+        users.current.set(id, user)
         console.log(users)
         return answer
-    }, [sendIce, users])
+    }, [sendIce, updateStreams, users])
+
+    const connectUser = useCallback(async (id:string)=>{
+        const user = new WebRtcUser(id, sendIce, updateStreams)
+        await user.createPeerConnection(undefined, (localStreamRef.current?localStreamRef.current.getTracks():undefined)).then(offer => sendOffer(id, offer));
+        console.log(user)
+        users.current.set(id, user)
+        console.log("connect ", id, users)
+    },[sendIce, sendOffer, updateStreams, users] )
+
     const startSocket = useCallback(()=>{
         if(!socketRef.current) return
         //function prev (m) {socketRef.current.onmessage(m)}
@@ -39,15 +83,16 @@ export default function useWebRTC(roomId){
                 case "answer": {
                     const data : Answer = parsed.data
                     console.log("answer", users, data.senderId)
-                    const ind = users.findIndex((user) => user.id === data.senderId)
-                    if(ind !== -1){
-                        const temp = users[ind]
-                        await temp.claimAnswer(data.answer)
+                    const user = users.current.get(data.senderId)
+                    if(user){
+                        await user.claimAnswer(data.answer)
+                        /*
                         setUsers(prev => prev.map((user, index) => {
                             if(index === ind)
                                 return temp
                             return user
                         }))
+                        */
                     } else{
                         console.log("Answer Sender not found")
                     }
@@ -68,9 +113,9 @@ export default function useWebRTC(roomId){
                     const data : Candidate = parsed.data
                     if(!data.candidate) return;
                     console.log(data.candidate)
-                    const sender = users.filter((user) => user.id === data.senderId)
-                    if(sender[0]){
-                        sender[0].claimCandidate(data.candidate)
+                    const sender = users.current.get(data.senderId)
+                    if(sender){
+                        sender.claimCandidate(data.candidate)
                     }
                     else{
                         console.log("Candidate Sender not found")
@@ -79,9 +124,9 @@ export default function useWebRTC(roomId){
                 }
                 case "offer": {
                     const data : Offer = parsed.data
-                    const sender = users.filter((user) => user.id === data.senderId)
-                    if(sender[0]){
-                        sender[0].claimOffer(data.offer)
+                    const sender = users.current.get(data.senderId)
+                    if(sender){
+                        sender.claimOffer(data.offer)
                             .then(answer => sendAnswer(data.senderId, answer))
                             .catch(err => console.error(err))
                     }
@@ -103,24 +148,30 @@ export default function useWebRTC(roomId){
 
 
 
+    const joinRoom = useCallback(
+        async () => {
+            socketRef.current.send(JSON.stringify({
+                "event": "joinRoom",
+                "data": {
+                    "userId": selfId.current,
+                    "roomId": roomId,
+                }
+            }))
+        },
+        [roomId, selfId, socketRef]
+    );
+
+
+    const Start = useCallback(() => {
+        startSocket();
+        console.log("Start Socket")
+
+    }, [startSocket])
+
+
+
     useEffect(()=>{
-        async function startCapture(){
-            localMediaStream.current = await navigator.mediaDevices.getUserMedia({audio: true, video: true})
-        }
-
-        addNewClient(LOCAL_VIDEO, () => {
-            const localVideoElement = peerMediaElements.current[LOCAL_VIDEO]
-
-            if(localVideoElement){
-                localVideoElement.volume = 0.1;
-                localVideoElement.srcObject = localMediaStream.current
-            }
-
-        })
-
-        startCapture().then(() => joinRoom(selfId, roomId))
-    },[roomId])
-
-
-
+        Start()
+    },[Start])
+    return [streams, setStreams, joinRoom]
 }
